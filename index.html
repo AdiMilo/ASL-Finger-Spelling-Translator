@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time ASL Finger-Spelling Translator</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        video, canvas { display: block; margin: 0 auto; max-width: 100%; border-radius: 4px; background: #333; }
+        .display-box { margin-top: 20px; padding: 15px; background: #eef2f3; border-left: 5px solid #007bff; border-radius: 4px; }
+        .output-text { font-size: 24px; font-weight: bold; color: #333; min-height: 35px; word-wrap: break-word; }
+        .controls { text-align: center; margin: 15px 0; }
+        button { padding: 10px 20px; font-size: 16px; font-weight: bold; cursor: pointer; border: none; border-radius: 4px; background-color: #28a745; color: white; }
+        button:hover { background-color: #218838; }
+        .status { font-style: italic; color: #666; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>ASL Live Video Translation Engine</h2>
+    <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    <canvas id="captureCanvas" width="640" height="480" style="display:none;"></canvas>
+
+    <div class="controls">
+        <button id="toggleEngine">Initialize Translation Stream</button>
+        <p id="statusDisplay" class="status">Stream Status: Offline</p>
+    </div>
+
+    <div class="display-box">
+        <h3>Translated Text Output</h3>
+        <p id="wordOutput" class="output-text">...</p>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('captureCanvas');
+    const ctx = canvas.getContext('2d');
+    const toggleBtn = document.getElementById('toggleEngine');
+    const statusDisplay = document.getElementById('statusDisplay');
+    const wordOutput = document.getElementById('wordOutput');
+
+    let isRunning = false;
+    let loopInterval = null;
+    let fullCompiledString = "";
+    let lastLoggedLetter = "";
+
+    // Access raw media hardware device streams
+    async function setupWebcam() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        } catch (err) {
+            statusDisplay.innerText = "Error: Webcam peripheral access blocked or unavailable.";
+        }
+    }
+
+    async function sampleAndTranslateFrame() {
+        if (!isRunning) return;
+
+        // Draw current frame into processing canvas matrix
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7); // Compress frame payload
+
+        statusDisplay.innerText = "Processing live gesture token...";
+
+        try {
+            const response = await fetch('/api/translate-frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl })
+            });
+            
+            const data = await response.json();
+            
+            if (data.letter && data.letter !== "UNKNOWN") {
+                processLetterInput(data.letter);
+            } else {
+                statusDisplay.innerText = "Listening for stable sign structure...";
+            }
+        } catch (error) {
+            console.error("Frame pipeline error:", error);
+        }
+    }
+
+    function processLetterInput(letter) {
+        statusDisplay.innerText = `Recognized Token: ${letter}`;
+
+        if (letter === "SPACE") {
+            if (fullCompiledString.length > 0 && !fullCompiledString.endsWith(" ")) {
+                fullCompiledString += " ";
+                lastLoggedLetter = "";
+            }
+        } else {
+            // Buffer debouncer filtering rule to eliminate processing consecutive identical frames
+            if (letter !== lastLoggedLetter) {
+                fullCompiledString += letter;
+                lastLoggedLetter = letter;
+            }
+        }
+        wordOutput.innerText = fullCompiledString || "...";
+    }
+
+    toggleBtn.addEventListener('click', () => {
+        if (!isRunning) {
+            isRunning = true;
+            toggleBtn.innerText = "Halt System Execution";
+            toggleBtn.style.backgroundColor = "#dc3545";
+            statusDisplay.innerText = "System Loop Active.";
+            // Throttle: Capture context array every 1200ms
+            loopInterval = setInterval(sampleAndTranslateFrame, 1200);
+        } else {
+            isRunning = false;
+            clearInterval(loopInterval);
+            toggleBtn.innerText = "Initialize Translation Stream";
+            toggleBtn.style.backgroundColor = "#28a745";
+            statusDisplay.innerText = "Stream Status: Offline";
+        }
+    });
+
+    setupWebcam();
+</script>
+</body>
+</html>
